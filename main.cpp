@@ -37,7 +37,7 @@
 #define TICK                .1
 #define DEBUG               1
 #define WAIT_TIME           20
-#define DIMS                39 //TODO can we hard code this? if not, add it as an input to functions
+#define DIMS                40 //TODO can we hard code this? if not, add it as an input to functions
 #define use                 10
 
 /*    int dims = floor(sqrt(world[0]))-1;
@@ -86,11 +86,11 @@ void hint(int row, int column, int power, int angle);
 
 //my functions:
 Bomb* launch(int angle, int power);
-bool update_bomb(Bomb* bomb, char *world);
-void build_fullworld(char *fworld, int *world);
+bool update_bomb(Bomb* bomb, char** world);
+void build_fullworld(char** fworld, int *world);
 void waitms(float ms);
-void handle_collision(int x, int y, char* world);
-bool check_node(int index, char direction, int* blacklist, char* world);
+bool handle_collision(int x, int y, char** world);
+bool check_node(int x, int y, char direction, int* blacklist, char** world);
 void egg();
 
 // Global variables for push buttons
@@ -150,9 +150,23 @@ int main() {
         //get world that will be used for your work
         int *world;
         getworld(&world, World);
-        printf("world[0]:%d\nworld[3]:%d\n",world[0],world[3]);
-        char* fw = (char*)calloc(world[0]*sizeof(char), sizeof(char));
+        if(DEBUG){ printf("world[0]:%d\nworld[3]:%d\n",world[0],world[3]); }
+        
+        
+        //make fw a 2d array (an array of array pointers. oh, C. ><)
+        //char* fw = (char*)calloc(world[0]*sizeof(char), sizeof(char));
+        if(DEBUG){ printf("allocating fworld\n"); }
+        char ** fw = (char**)malloc(DIMS*sizeof(char*));
+        int f;
+        for(f=0;f<DIMS;f++){
+            fw[f]=(char*)calloc(DIMS*sizeof(char),sizeof(char));
+            if(fw[f]==NULL){ printf("ERROR ALLOCATING!\n"); exit(1); }
+        }
+        if(fw==NULL){ printf("ERROR allocating full world!"); exit(1); }
+        if(DEBUG){ printf("39,39 should be 0:%d.\n", fw[39][39]); }
+        if(DEBUG){ printf("fworld allocated. filling...\n"); }
         build_fullworld(fw, world);
+        if(DEBUG){ printf("fworld filled.\n"); }
 
 
         //clear the terminal
@@ -182,11 +196,10 @@ int main() {
                 printf("Z was pressed: FIRE!!!\n");
                 pb4_hit_callback(); 
                 Bomb* b = launch(angle,power);
-                //Bomb* b = &bomb;
                 updateShot(0,0,DEL);
                 bool collision = false;
                 while( !collision ){
-                    printf("Status:%d\n", collision);
+                    //printf("Status:%d\n", collision);
                     collision=update_bomb(b, fw);
                     //printf("time:%f\n", b->t);
                     waitms(WAIT_TIME);
@@ -266,34 +279,40 @@ Bomb* launch(int angle, int power){
     return b;
 }
 
-bool update_bomb(Bomb* bomb, char *world){
+bool update_bomb(Bomb* bomb, char** world){
+    int x,y;
     bomb->t += TICK;
-    bomb->y = floor(bomb->vy*bomb->t - 0.5*GRAVITY*bomb->t*bomb->t);
-    bomb->x = floor(bomb->vx * bomb->t);
-    if(DEBUG){ printf("t:%f\tx:%d\ty:%d\n",bomb->t,bomb->x,bomb->y); }
-    updateShot(bomb->y, bomb->x, DEL);
+    y = floor(bomb->vy*bomb->t - 0.5*GRAVITY*bomb->t*bomb->t);
+    x = floor(bomb->vx * bomb->t);
+    bomb->x=x;
+    bomb->y=y;
+    if(DEBUG){ printf("t:%f\tx:%d\ty:%d\n",bomb->t,x,y); }
+    updateShot(y, x, DEL);//stupid update shot wants y,x (row, col)
     //check for colisions
     //make colision changes
-    if(bomb->x>DIMS || bomb->x<0 || bomb->y>DIMS || bomb->y<0){//TODO can it go off map from above?
+    if( x>DIMS || x<0 || y>DIMS || y<0 ){//TODO can it go off map from above?
         return true;
-    }else if(world[bomb->x+bomb->y*DIMS]!=0){
-        handle_collision(bomb->x, bomb->y, world);
+    }else if(world[x][y]!=0){
+        bool update_map = handle_collision(x, y, world);
         updateShot(0,0,DEL); //reset bomb position
         
-        int index = bomb->x+bomb->y*DIMS;
-        int* blacklist = (int*)malloc(DIMS*DIMS*sizeof(int));//this can probably be smaller, but meh
-        if(blacklist == NULL){ printf("OH NOES!\n"); exit(1); }
-        
-        bool up,down,left,right;
-        printf("up----------------\n");
-        up=check_node(index+DIMS,0,blacklist, world);
-        printf("down---------------\n");
-        down=check_node(index-DIMS,2,blacklist, world);
-        printf("left--------------\n");
-        left=check_node(index-1,1,blacklist, world);
-        printf("right-------------\n");
-        right=check_node(index+1,3,blacklist, world);
-        printf("results:%d,%d,%d,%d.\n",up,down,left,right);
+        if(update_map){
+            //int* blacklist = (int*)malloc(DIMS*DIMS*sizeof(int));//this can probably be smaller, but meh
+            //if(blacklist == NULL){ printf("OH NOES!\n"); exit(1); }
+            int blacklist[500];
+            
+            bool up,down,left,right;
+            printf("up----------------\n");
+            up=check_node(x,y+1,0,blacklist, world);
+            printf("down---------------\n");
+            down=check_node(x,y-1,2, &blacklist[100], world);
+            printf("left--------------\n");
+            left=check_node(x-1,y,1, &blacklist[200], world);
+            printf("right-------------\n");
+            right=check_node(x+1,y,3, &blacklist[300], world);
+            printf("results:%d,%d,%d,%d.\n",up,down,left,right);
+            //free(blacklist);
+        }
         
         return true;
     }else{
@@ -301,9 +320,44 @@ bool update_bomb(Bomb* bomb, char *world){
     }
        
 }
+//0-up,1-left,2-down,3-right
+bool check_node(int x, int y, char direction, int* blacklist, char** world){
+    printf("thing at %d,%d: %d\n", x,y,world[x][y]);
+    if ( world[x][y]==0 ){
+        printf("%d,%d is empty\n", x,y);
+        return true;  //nothing here
+    }else if( y==0 ){
+        printf("%d,%d is grounded\n", x,y);
+        return false; //connects to ground
+    }else{
+        printf("do next\n");
+        switch( direction ){
+            case 0: //up-> up,left,right
+                if( check_node(x,y+1,0, blacklist, world)
+                        && check_node(x-1,y,0, blacklist, world)
+                        && check_node(x+1,y,0, blacklist, world) ){
+                    printf("%d,%d goes to air\n",x,y);
+                    return true;
+                }else{ return false; }
+                break;
+            case 1: //left-> left,up,down
+                break;
+            case 2: //down-> left,down,right
+                break;
+            case 3: //right-> up, right, down
+                break;
+            default:
+                printf("ERROR: bad direction\n");
+        }
+        /*if( check_node(forward) && check_node(left) && check_node(right) ){
+            blacklist[0]=index;//blacklist the current node
+            return true; //deletable
+        }*/
+    }
+}
 
-void build_fullworld(char* fworld, int* world){
 
+void build_fullworld(char** fworld, int* world){
 /*
 0        Total size of array (#rows *#columns)
 1        Number of non-empty squares
@@ -313,17 +367,10 @@ i*4+4    Type of object in ith non-empty square
 i*4+5    Strength of the ith non-empty square
 ‘M’, ‘T’, and ‘B’ are ASCII codes 77, 84, and 66. The strength field will be an integer 1-5.
 */
-
     //use calloc to initalize to 0, then make specified changes
     //air->0, monkey->-1, branch->1..5, tree->6..10 (-5)
     // char is more memory efficient
     int i=0;
-    //dims=39;
-    /*printf("world[1]: %d\n\n", world[1]);
-    for(i=0;i<10;i++){
-        printf("%d\n",world[i]);
-    }
-    printf("\n");*/
     for(i=2;i<world[1]*4+2;i+=4){
         /*printf("%drow:\t%d\n",i,world[i]);
         printf("%dcol:\t%d\n",i,world[i+1]);
@@ -332,78 +379,54 @@ i*4+5    Strength of the ith non-empty square
 /* -1 means monkey, 0 means nothing, 1-5 means branch, 6-10 means tree*/
         switch( world[i+2] ){
             case 66:
-                fworld[ world[i+1]+world[i]*DIMS ]=world[i+3];
+                fworld[world[i+1]][world[i]]= world[i+3];
                 break;
             case 77:
-                fworld[ world[i+1]+world[i]*DIMS ]=-1;
+                fworld[world[i+1]][world[i]]= -1;
                 break;
             case 84:
-                fworld[ world[i+1]+world[i]*DIMS ]=5+world[i+3];
+                fworld[world[i+1]][world[i]]= 5+world[i+3];
                 break;
             default:
                 printf("WARNING! world contained something other than M,T,B\n");
         }
+        //updateShot(world[i+1],world[i],0);
     }
-    if(DEBUG){ printf("\n\n27,26: %d\n", fworld[25+27*DIMS]); }
-    if (fworld == NULL){
-        printf("ohshiz!\n");
-        exit(0);
-    }
+    if(DEBUG){ printf("\n\n17,26: %d\n", fworld[26][17]); }
 }
 
-    //air->0, monkey->-1, branch->1..5, tree->6..10 (-5)
-//colorTile(int row, int column, int strength){
-void handle_collision(int x, int y, char* world){
+
+bool handle_collision(int x, int y, char** world){
+    bool removed=false;
     if(DEBUG){
         //printf("handle_collision called\n");
-        printf("thing at %d,%d: %d\n", x,y,world[x+DIMS*y]);
+        printf("thing at %d,%d: %d\n", x,y,world[x][y]);
     }
-    switch( world[x+DIMS*y] ){
+    switch( world[x][y] ){
         case -1: //Monkey
         case 1: //Dead branch
         case 6: //dead tree
-            world[x+DIMS*y]=0;
+            world[x][y]=0;
             deleteTile(y,x);
+            removed=true;
             break;
         case 2: //branches
         case 3:
         case 4:
         case 5:
-            colorTile(y,x,--world[x+DIMS*y]);
+            colorTile(y,x,--world[x][y]);
             break;
         case 7: //trees
         case 8:
         case 9:
         case 10:
-            colorTile(y,x,(--world[x+DIMS*y])-5);
+            colorTile(y,x,(--world[x][y])-5);
             break;
         default:
             printf("WTF!?!?");
     }
-    
+    return removed;
 }
-
-
-
-bool check_node(int index, char direction, int* blacklist, char* world){
-    if ( world[index]==' ' ){
-        printf("%d is empty\n", index);
-        return true;  //nothing here
-    }else if( index<40 ){
-        printf("%d is grounded\n", index);
-        return false; //connects to ground
-    }else{
-        printf("do next\n");
-        /*int left = 
-        int right = 
-        int forward =
-        if( check_node(forward) && check_node(left) && check_node(right) ){
-            blacklist[0]=index;//blacklist the current node
-            return true; //deletable
-        }*/
-    }
-}
-
 
 
 void waitms(float ms){
