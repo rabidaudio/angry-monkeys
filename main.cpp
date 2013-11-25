@@ -1,5 +1,5 @@
 /**********************************
- * Author: Seungcheol Baek
+ * Author: Charles Julian Knight
  * Institution: Georgia Tech
  *
  * Title: MAIN
@@ -37,11 +37,8 @@
 #define TICK                .1
 #define DEBUG               1
 #define WAIT_TIME           20
-#define DIMS                40 //TODO can we hard code this? if not, add it as an input to functions
+#define DIMS                40
 #define use                 10
-
-/*    int dims = floor(sqrt(world[0]))-1;
-    printf("dims:%d",dims);*/
 
 
 
@@ -88,7 +85,12 @@ void paaUpdate(int power, int angle);
 void hint(int row, int column, int power, int angle);
 //void run_test_trajectory(int *world);
 
-//my functions:
+
+/* I make heavy use of the bool type, even though
+   I'm aware it is a C++ (or C99 with a library)
+   thing, because it looks prettier and probably
+   runs faster than returning a whole 4 byte int
+   for a single bit.                          */
 Bomb* launch(int angle, int power);
 bool update_bomb(Bomb* bomb, char** world);
 void build_fullworld(char** fworld, int *world);
@@ -104,8 +106,10 @@ void egg();
 char volatile power=PHIGH, angle=45, fire;
 int connection_fd;
 
-int bl_index=-1; //this is bad practice, but it works, so give me a break
+//These are only globals because I can't have a blacklist object
+int bl_index=-1;
 int bl_frame=-1;
+int block_count;
 
 //main
 int main() {
@@ -113,10 +117,9 @@ int main() {
     START:    
     //variables
     //unsigned char World[BUFFSIZE];
+    //I put this in the heap instead, trying to fix the world[0]=0 issue
     unsigned char* World = (unsigned char*)malloc(BUFFSIZE);
-    //World[0]=12;
     if(World == NULL){
-    //if(World[0] != 12){
         printf("BAD WORLD ALLOC\n");
         exit(1);
     }
@@ -145,7 +148,7 @@ int main() {
     timeout.tv_usec = 0;
     setsockopt(connection_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
   
-    /******** Project 2 *********/    
+   
     //loop
     while(1) {
         //synchronize front end display  
@@ -160,25 +163,26 @@ int main() {
         //get world that will be used for your work
         int *world;
         getworld(&world, World);
-        if(DEBUG){ printf("world[0]:%d\nworld[3]:%d\n",world[0],world[3]); }
+        //using if(DEBUG) is great, because the compiler will realize it isn't reachable and drop it
+        if(DEBUG) printf("world[0]:%d\nworld[3]:%d\n",world[0],world[3]); 
         
         
         /* The sparse array is great for sending over a socket, but not very
            practical. I create a 2D char array of the world from the sparse
            array and use that instead. It makes the searching algorithms alone
            many times easier (and it's not like it's a huge resource cost). */
-        if(DEBUG){ printf("allocating fworld\n"); }
-        char ** fw = (char**)malloc(DIMS*sizeof(char*));
+        if(DEBUG) printf("allocating fworld\n"); 
+        char** fw = (char**)malloc(DIMS*sizeof(char*)); // yo, dawg, I heard you like pointers...
         int f;
         for(f=0;f<DIMS;f++){
             fw[f]=(char*)calloc(DIMS*sizeof(char),sizeof(char));
             if(fw[f]==NULL){ printf("ERROR ALLOCATING!\n"); exit(1); }
         }
         if(fw==NULL){ printf("ERROR allocating full world!"); exit(1); }
-        if(DEBUG){ printf("39,39 should be 0:%d.\n", fw[39][39]); }
-        if(DEBUG){ printf("fworld allocated. filling...\n"); }
+        if(DEBUG) printf("39,39:%d.\n", fw[39][39]); 
+        if(DEBUG) printf("fworld allocated. filling...\n"); 
         build_fullworld(fw, world);
-        if(DEBUG){ printf("fworld filled.\n"); }
+        if(DEBUG) printf("fworld filled.\n"); 
 
 
         //clear the terminal
@@ -217,21 +221,21 @@ int main() {
                 num_cannon--;
                 free(b);
             } else if(pb=='x'){
-                    //printf("X was pressed: decreasing angle\n");
+                    if(DEBUG) printf("X was pressed: decreasing angle\n");
                     pb3_hit_callback(); 
                     if(power==PHIGH)
                             printf("Angle:%d PHIGH\n", angle);
                     else
                             printf("Angle:%d PLOW\n", angle);
             } else if(pb=='c'){
-                    //printf("C was pressed: increasing angle\n");
+                    if(DEBUG) printf("C was pressed: increasing angle\n");
                     pb2_hit_callback(); 
                     if(power==PHIGH)
                             printf("Angle:%d PHIGH\n", angle);
                     else
                             printf("Angle:%d PLOW\n", angle); 
             } else if(pb=='v'){
-                    //printf("V was pressed: toggling power\n");
+                    if(DEBUG) printf("V was pressed: toggling power\n");
                     pb1_hit_callback(); 
                     if(power==PHIGH)
                             printf("Angle:%d PHIGH\n", angle);
@@ -249,10 +253,15 @@ int main() {
                     free(fw);
                     close(socket_fd);
                     goto START;
+                    /*"For a number of years I have been familiar with the observation that the quality of programmers
+                       is a decreasing function of the density of go to statements in the programs they produce. More
+                       recently I discovered why the use of the go to statement has such disastrous effects, and I
+                       became convinced that the go to statement should be abolished from all "higher level" programming
+                       languages (i.e. everything except, perhaps, plain machine code)."   -- Edsger W. Dijkstra, 1968
+                                 http://www.u.arizona.edu/~rubinson/copyright_violations/Go_To_Considered_Harmful.html */
             } else if(pb=='d'){ egg();
-            }  else if(pb=='t'){//TODO
-                     printf("debug....\n");
-
+            /*}  else if(pb=='t'){//TODO
+                     printf("debug....\n");*/
             }  else {
                 printf("testing\n");
                 printf("string1: %s\nstring2: %s\n", "hello", "world");
@@ -266,7 +275,6 @@ int main() {
         }
     
         printf("Out of bombs. Goodbye!\n");
-
 
 
         free(world);  
@@ -310,49 +318,59 @@ bool update_bomb(Bomb* bomb, char** world){
         bool update_map = handle_collision(x, y, world);
         updateShot(0,0,DEL); //reset bomb position
         
+        /*For updating the map, I use what I call a blacklist. I do a depth-first
+          search through adjacent blocks, adding each to the blacklist. When the
+          deepest node in the branch is reached, it will return true if it's
+          sorrounded by air and can be deleted or false if it is connected to the
+          ground. This trickles back up the branch. If the branch can be deleted,
+          we push the blacklist frame up to the blacklist index and move to the
+          next direction. If the branch can't be deleted, the blacklist pointer
+          jumps back to the blacklist frame, and new nodes are written over the
+          previous ones. Whatever is in the blacklist array (from 0 to the frame)
+          is then deleted (which could be nothing if the frame remains at -1). */
         if(update_map){
-            chord blacklist[DIMS*DIMS]; //TODO get this from build_fullworld
+            chord blacklist[block_count];
             bl_index=-1; bl_frame=-1;
-            //bool up,down,left,right;
             printf("up----------------\n");
             if( check_node(x,y+1,blacklist, world) ){
                 printf("We can delete this node\n");
-                //trash_blacklist(blacklist, world);
                 bl_frame=bl_index;//step the frame forward
             }else{
                 printf("this node is grounded\n");
-                bl_index=bl_frame;//rollback_blacklist(blacklist);
+                bl_index=bl_frame; //rollback blacklist
             }
             
-            printf("down---------------\n");
-            if( check_node(x,y-1,blacklist, world) ){
-                printf("We can delete this node\n");
-                bl_frame=bl_index;
-            }else{
-                printf("this node is grounded\n");
-                bl_index=bl_frame;//rollback_blacklist(blacklist);
-            }
-            
-            printf("left---------------\n");
-            if( check_node(x-1,y,blacklist, world) ){
-                printf("We can delete this node\n");
-                bl_frame=bl_index;
-            }else{
-                printf("this node is grounded\n");
-                bl_index=bl_frame;//rollback_blacklist(blacklist);
-            }
-            
-            printf("right---------------\n");
-            if( check_node(x+1,y,blacklist, world) ){
-                printf("We can delete this node\n");
-                bl_frame=bl_index;
-            }else{
-                printf("this node is grounded\n");
-                bl_index=bl_frame;//rollback_blacklist(blacklist);
-            }
+            //if( world[x][y]<6 && world[x][y]>0 ){ //branch TODO
+                
+                printf("down---------------\n");
+                if( check_node(x,y-1,blacklist, world) ){
+                    printf("We can delete this node\n");
+                    bl_frame=bl_index;
+                }else{
+                    printf("this node is grounded\n");
+                    bl_index=bl_frame;
+                }
+                
+                printf("left---------------\n");
+                if( check_node(x-1,y,blacklist, world) ){
+                    printf("We can delete this node\n");
+                    bl_frame=bl_index;
+                }else{
+                    printf("this node is grounded\n");
+                    bl_index=bl_frame;
+                }
+                
+                printf("right---------------\n");
+                if( check_node(x+1,y,blacklist, world) ){
+                    printf("We can delete this node\n");
+                    bl_frame=bl_index;
+                }else{
+                    printf("this node is grounded\n");
+                    bl_index=bl_frame;
+                }
+            //}
             trash_blacklist(blacklist, world);
         }
-        
         return true;
     }else{
         return false;
@@ -361,12 +379,16 @@ bool update_bomb(Bomb* bomb, char** world){
 }
 //0-up,1-left,2-down,3-right
 bool check_node(int x, int y, chord* blacklist, char** world){
-    //if(DEBUG) printf("thing at %d,%d: %d\n", x,y,world[x][y]);
+    if(DEBUG) printf("thing at %d,%d: %d\n", x,y,world[x][y]);
     chord c;
     c.x=x; c.y=y;
-    if ( world[x][y]==0 ){
-        //if(DEBUG) printf("%d,%d is empty\n", x,y);
+    if ( world[x][y] == 0 ){ //Air
+        if(DEBUG) printf("%d,%d is empty\n", x,y);
         return true;  //nothing here
+    }else if( world[x][y]< 0 ){
+        if(DEBUG) printf("%d,%d has monkey\n",x,y);
+        blacklist[++bl_index]=c;
+        return true; //kill dat monkey
     }else if( y==0 ){
         printf("%d,%d is grounded\n", x,y);
         return false; //connects to ground
@@ -374,12 +396,20 @@ bool check_node(int x, int y, chord* blacklist, char** world){
         return true; //Already checked
     }else{
         if(DEBUG) printf("moving to next node\n");
-        add_to_blacklist(blacklist, c);
-        if( check_node(x,y+1, blacklist, world)             //up
+        blacklist[++bl_index]=c;
+        if( world[x][y]>5 //&& world[x][y-1]==0  //TREE 
+                && check_node(x,y+1, blacklist, world)      //up
                 && check_node(x-1,y, blacklist, world)      //left
                 && check_node(x+1,y, blacklist, world)      //right
                 && check_node(x,y-1, blacklist, world) ){   //down
-            if(DEBUG) printf("%d,%d this node goes to air\n",x,y);
+            if(DEBUG) printf("%d,%d this tree node goes to air\n",x,y);
+            return true;
+        }else if( world[x][y]<6             //Branch
+                && check_node(x,y+1, blacklist, world)      //up
+                && check_node(x-1,y, blacklist, world)      //left
+                && check_node(x+1,y, blacklist, world)      //right
+                && check_node(x,y-1, blacklist, world) ){   //down
+            if(DEBUG) printf("%d,%d this branch node goes to air\n",x,y);
             return true;
         }else{
             return false;
@@ -387,13 +417,9 @@ bool check_node(int x, int y, chord* blacklist, char** world){
     }
 }
 
-//This is a rare time where I would actually prefer OOP. Methods, anyone?
-// Hell, this _is_ technically C++, so I could...
-void add_to_blacklist(chord* blacklist, chord c){
-    blacklist[++bl_index]=c;
-    
-}
+
 bool in_blacklist(chord* blacklist, chord c){
+    //search to see if the block is already on the list
     if(DEBUG) printf("find in blacklist called\t"); 
     int i=0;
     for(i=0; i<=bl_index; i++){
@@ -407,7 +433,6 @@ bool in_blacklist(chord* blacklist, chord c){
     if(DEBUG) printf("not found\n"); 
     return false;
 }
-
 void trash_blacklist(chord* blacklist, char** world){
     //go backwards through the blacklist, removing tiles.
     printf("current blacklist snapshot (%d):\n", bl_index);
@@ -436,6 +461,10 @@ void trash_blacklist(chord* blacklist, char** world){
     }
     bl_index=bl_frame;
 }*/
+/*void add_to_blacklist(chord* blacklist, chord c){
+    blacklist[++bl_index]=c;
+}*/
+
 
 
 void build_fullworld(char** fworld, int* world){
@@ -449,6 +478,7 @@ i*4+5    Strength of the ith non-empty square
 ‘M’, ‘T’, and ‘B’ are ASCII codes 77, 84, and 66. The strength field will be an integer 1-5.
 */
     int i=0;
+    block_count=world[1];
     for(i=2;i<world[1]*4+2;i+=4){
         if(DEBUG){
             printf("%drow:\t%d\n",i,world[i]);
@@ -483,12 +513,22 @@ bool handle_collision(int x, int y, char** world){
     if(DEBUG){
         printf("thing at %d,%d: %d\n", x,y,world[x][y]);
     }
+    int h=0;
+    char item= world[x][y];
     switch( world[x][y] ){
         case -1: //Monkey
         case 1: //Dead branch
-        case 6: //dead tree
+        case 6:
             world[x][y]=0;
             deleteTile(y,x);
+            removed=true;
+            break;
+        /*case 6: //dead tree
+            while(item != 0){
+                world[x][y+h]=0;
+                deleteTile(y+h,x);
+                item=world[x][y+(++h)];
+            }//TODO no better than other less hackish solution*/
             removed=true;
             break;
         case 2: //branches
