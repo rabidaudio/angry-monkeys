@@ -66,6 +66,10 @@ typedef struct Bomb{
     float vy;
 } Bomb;
 
+typedef struct chord{
+    int x;
+    int y;
+} chord;
 
 //function prototypes
 int  invert(int value);
@@ -90,12 +94,18 @@ bool update_bomb(Bomb* bomb, char** world);
 void build_fullworld(char** fworld, int *world);
 void waitms(float ms);
 bool handle_collision(int x, int y, char** world);
-bool check_node(int x, int y, char direction, int* blacklist, char** world);
+bool check_node(int x, int y, chord* blacklist, char** world);
+void add_to_blacklist(chord* blacklist, chord c);
+bool in_blacklist(chord* blacklist, chord c);
+void trash_blacklist(chord* blacklist, char** world);
 void egg();
 
 // Global variables for push buttons
 char volatile power=PHIGH, angle=45, fire;
 int connection_fd;
+
+int bl_index=-1; //this is bad practice, but it works, so give me a break
+int bl_frame=-1;
 
 //main
 int main() {
@@ -153,8 +163,10 @@ int main() {
         if(DEBUG){ printf("world[0]:%d\nworld[3]:%d\n",world[0],world[3]); }
         
         
-        //make fw a 2d array (an array of array pointers. oh, C. ><)
-        //char* fw = (char*)calloc(world[0]*sizeof(char), sizeof(char));
+        /* The sparse array is great for sending over a socket, but not very
+           practical. I create a 2D char array of the world from the sparse
+           array and use that instead. It makes the searching algorithms alone
+           many times easier (and it's not like it's a huge resource cost). */
         if(DEBUG){ printf("allocating fworld\n"); }
         char ** fw = (char**)malloc(DIMS*sizeof(char*));
         int f;
@@ -177,7 +189,6 @@ int main() {
         printf("Push the buttons.\n");
         printf("Z - fire cannon\nX - decrease angle    C - increase angle\nV - toggle power\nR - reset    Q - quit\n");
  
-        /****   BEGIN - your code goes here for project 2  ****/
     
         int i, num_cannon=10;
         char pb;
@@ -185,29 +196,26 @@ int main() {
         updateShot(0,0,DEL); //reset bomb position
         
         //get pb
-        //TODO while(num_cannon>0){
+        //TODO while(num_cannon>0 || monkey_count<=0){
         while(1){
             // it's basically impossible to get a keyboard to function in the same way as mbed pushbuttons so...
             // the get_pb_zxcvqr() function returns the character of the next keyboard button pressed
             pb=get_pb_zxcvqr();
             // and then based on that character, you can do something useful!
             //TODO calculate and send hints
+            //hint(10, 28, PHIGH, 10);
             if(pb=='z'){
                 printf("Z was pressed: FIRE!!!\n");
                 pb4_hit_callback(); 
                 Bomb* b = launch(angle,power);
                 updateShot(0,0,DEL);
                 bool collision = false;
-                while( !collision ){
-                    //printf("Status:%d\n", collision);
+                while( !collision ){ //bomb is soaring through the air
                     collision=update_bomb(b, fw);
-                    //printf("time:%f\n", b->t);
                     waitms(WAIT_TIME);
                 }
-                //TODO update world
                 num_cannon--;
                 free(b);
-            //run_test_trajectory(world);
             } else if(pb=='x'){
                     //printf("X was pressed: decreasing angle\n");
                     pb3_hit_callback(); 
@@ -232,11 +240,13 @@ int main() {
             } else if(pb=='q'){
                 printf("EXIT\n");
                     free(world);
+                    free(fw);
                     close(socket_fd);
             exit(1);
             }  else if(pb=='r'){
                     printf("RESTART\n");
                     free(world);
+                    free(fw);
                     close(socket_fd);
                     goto START;
             } else if(pb=='d'){ egg();
@@ -245,20 +255,20 @@ int main() {
 
             }  else {
                 printf("testing\n");
-            printf("string1: %s\nstring2: %s\n", "hello", "world");
-            printf("int: %d, int: %d\n", world[2], world[3]); 
-                    printf("Shots left:%d\n", num_cannon);
-                    if(power==PHIGH)
-                            printf("Angle:%d PHIGH\n", angle);
-                    else
-                            printf("Angle:%d PLOW\n", angle);
+                printf("string1: %s\nstring2: %s\n", "hello", "world");
+                printf("int: %d, int: %d\n", world[2], world[3]); 
+                printf("Shots left:%d\n", num_cannon);
+                if(power==PHIGH)
+                        printf("Angle:%d PHIGH\n", angle);
+                else
+                        printf("Angle:%d PLOW\n", angle);
             }
         }
     
-        printf("Out of bombs. Goodbye!");
-        //have fun... 
-        
-        /****    END - your code stops here   ****/
+        printf("Out of bombs. Goodbye!\n");
+
+
+
         free(world);  
         free(fw);
         close(socket_fd);
@@ -268,6 +278,7 @@ int main() {
 }
 
 Bomb* launch(int angle, int power){
+    //create a Bomb for a given angle and power
     printf("angle:%d\tpower:%d\n",angle,power);
     Bomb* b = (Bomb *)malloc(sizeof(Bomb));
     b->x=0;
@@ -280,38 +291,66 @@ Bomb* launch(int angle, int power){
 }
 
 bool update_bomb(Bomb* bomb, char** world){
+    //move the bomb one more tick, and return true if the shot is over
     int x,y;
-    bomb->t += TICK;
+    bomb->t += TICK; //discrete time intervals of TICK seconds (0.1s works well)
     y = floor(bomb->vy*bomb->t - 0.5*GRAVITY*bomb->t*bomb->t);
     x = floor(bomb->vx * bomb->t);
     bomb->x=x;
     bomb->y=y;
-    if(DEBUG){ printf("t:%f\tx:%d\ty:%d\n",bomb->t,x,y); }
+    if(DEBUG) printf("t:%f\tx:%d\ty:%d\n",bomb->t,x,y); 
     updateShot(y, x, DEL);//stupid update shot wants y,x (row, col)
     //check for colisions
-    //make colision changes
-    if( x>DIMS || x<0 || y>DIMS || y<0 ){//TODO can it go off map from above?
+    if( x>DIMS-1 || x<0 || y>DIMS-1 || y<0 ){//TODO can it go off map from above?
+        if(DEBUG) printf("Off-screen\n"); 
+        updateShot(0,0,DEL); //reset bomb position
         return true;
     }else if(world[x][y]!=0){
+        if(DEBUG) printf("Collision!\n");
         bool update_map = handle_collision(x, y, world);
         updateShot(0,0,DEL); //reset bomb position
         
         if(update_map){
-            //int* blacklist = (int*)malloc(DIMS*DIMS*sizeof(int));//this can probably be smaller, but meh
-            //if(blacklist == NULL){ printf("OH NOES!\n"); exit(1); }
-            int blacklist[500];
-            
-            bool up,down,left,right;
+            chord blacklist[DIMS*DIMS]; //TODO get this from build_fullworld
+            bl_index=-1; bl_frame=-1;
+            //bool up,down,left,right;
             printf("up----------------\n");
-            up=check_node(x,y+1,0,blacklist, world);
+            if( check_node(x,y+1,blacklist, world) ){
+                printf("We can delete this node\n");
+                //trash_blacklist(blacklist, world);
+                bl_frame=bl_index;//step the frame forward
+            }else{
+                printf("this node is grounded\n");
+                bl_index=bl_frame;//rollback_blacklist(blacklist);
+            }
+            
             printf("down---------------\n");
-            down=check_node(x,y-1,2, &blacklist[100], world);
-            printf("left--------------\n");
-            left=check_node(x-1,y,1, &blacklist[200], world);
-            printf("right-------------\n");
-            right=check_node(x+1,y,3, &blacklist[300], world);
-            printf("results:%d,%d,%d,%d.\n",up,down,left,right);
-            //free(blacklist);
+            if( check_node(x,y-1,blacklist, world) ){
+                printf("We can delete this node\n");
+                bl_frame=bl_index;
+            }else{
+                printf("this node is grounded\n");
+                bl_index=bl_frame;//rollback_blacklist(blacklist);
+            }
+            
+            printf("left---------------\n");
+            if( check_node(x-1,y,blacklist, world) ){
+                printf("We can delete this node\n");
+                bl_frame=bl_index;
+            }else{
+                printf("this node is grounded\n");
+                bl_index=bl_frame;//rollback_blacklist(blacklist);
+            }
+            
+            printf("right---------------\n");
+            if( check_node(x+1,y,blacklist, world) ){
+                printf("We can delete this node\n");
+                bl_frame=bl_index;
+            }else{
+                printf("this node is grounded\n");
+                bl_index=bl_frame;//rollback_blacklist(blacklist);
+            }
+            trash_blacklist(blacklist, world);
         }
         
         return true;
@@ -321,40 +360,82 @@ bool update_bomb(Bomb* bomb, char** world){
        
 }
 //0-up,1-left,2-down,3-right
-bool check_node(int x, int y, char direction, int* blacklist, char** world){
-    printf("thing at %d,%d: %d\n", x,y,world[x][y]);
+bool check_node(int x, int y, chord* blacklist, char** world){
+    //if(DEBUG) printf("thing at %d,%d: %d\n", x,y,world[x][y]);
+    chord c;
+    c.x=x; c.y=y;
     if ( world[x][y]==0 ){
-        printf("%d,%d is empty\n", x,y);
+        //if(DEBUG) printf("%d,%d is empty\n", x,y);
         return true;  //nothing here
     }else if( y==0 ){
         printf("%d,%d is grounded\n", x,y);
         return false; //connects to ground
+    }else if( in_blacklist(blacklist, c) ){
+        return true; //Already checked
     }else{
-        printf("do next\n");
-        switch( direction ){
-            case 0: //up-> up,left,right
-                if( check_node(x,y+1,0, blacklist, world)
-                        && check_node(x-1,y,0, blacklist, world)
-                        && check_node(x+1,y,0, blacklist, world) ){
-                    printf("%d,%d goes to air\n",x,y);
-                    return true;
-                }else{ return false; }
-                break;
-            case 1: //left-> left,up,down
-                break;
-            case 2: //down-> left,down,right
-                break;
-            case 3: //right-> up, right, down
-                break;
-            default:
-                printf("ERROR: bad direction\n");
+        if(DEBUG) printf("moving to next node\n");
+        add_to_blacklist(blacklist, c);
+        if( check_node(x,y+1, blacklist, world)             //up
+                && check_node(x-1,y, blacklist, world)      //left
+                && check_node(x+1,y, blacklist, world)      //right
+                && check_node(x,y-1, blacklist, world) ){   //down
+            if(DEBUG) printf("%d,%d this node goes to air\n",x,y);
+            return true;
+        }else{
+            return false;
         }
-        /*if( check_node(forward) && check_node(left) && check_node(right) ){
-            blacklist[0]=index;//blacklist the current node
-            return true; //deletable
-        }*/
     }
 }
+
+//This is a rare time where I would actually prefer OOP. Methods, anyone?
+// Hell, this _is_ technically C++, so I could...
+void add_to_blacklist(chord* blacklist, chord c){
+    blacklist[++bl_index]=c;
+    
+}
+bool in_blacklist(chord* blacklist, chord c){
+    if(DEBUG) printf("find in blacklist called\t"); 
+    int i=0;
+    for(i=0; i<=bl_index; i++){
+        chord check = blacklist[i];
+        if(check.x==c.x && check.y==c.y){
+            if(DEBUG) printf("found\n"); 
+            return true;
+            break;
+        }
+    }
+    if(DEBUG) printf("not found\n"); 
+    return false;
+}
+
+void trash_blacklist(chord* blacklist, char** world){
+    //go backwards through the blacklist, removing tiles.
+    printf("current blacklist snapshot (%d):\n", bl_index);
+    int j;
+    for(j=0;j<=bl_index;j++){
+        printf("\t\t%d,%d\n", blacklist[j].x,blacklist[j].y);
+    }
+    int i=bl_index;
+    while( i >= 0 ){
+        if(DEBUG) printf("\tdeleting %d,%d...\n",blacklist[i].x,blacklist[i].y); 
+        world[ blacklist[i].x ][ blacklist[i].y ]=0;
+        deleteTile( blacklist[i].y, blacklist[i].x );
+        blacklist[i].y=0;
+        blacklist[i].x=0;
+        i--;
+    }
+    if(DEBUG) printf("Done deleteing\n"); 
+    bl_index=-1;
+}
+
+/*void rollback_blacklist(chord* blacklist){
+    int i=bl_index;
+    while(i>bl_frame){//TODO this might not be neccessary?
+        blacklist[i].x=0;
+        blacklist[i].y=0;
+    }
+    bl_index=bl_frame;
+}*/
 
 
 void build_fullworld(char** fworld, int* world){
@@ -367,15 +448,14 @@ i*4+4    Type of object in ith non-empty square
 i*4+5    Strength of the ith non-empty square
 ‘M’, ‘T’, and ‘B’ are ASCII codes 77, 84, and 66. The strength field will be an integer 1-5.
 */
-    //use calloc to initalize to 0, then make specified changes
-    //air->0, monkey->-1, branch->1..5, tree->6..10 (-5)
-    // char is more memory efficient
     int i=0;
     for(i=2;i<world[1]*4+2;i+=4){
-        /*printf("%drow:\t%d\n",i,world[i]);
-        printf("%dcol:\t%d\n",i,world[i+1]);
-        printf("%dtype:\t%d\n",i,world[i+2]);
-        printf("%dstrength:\t%d\n",i,world[i+3]);*/
+        if(DEBUG){
+            printf("%drow:\t%d\n",i,world[i]);
+            printf("%dcol:\t%d\n",i,world[i+1]);
+            printf("%dtype:\t%d\n",i,world[i+2]);
+            printf("%dstrength:\t%d\n",i,world[i+3]);
+        }
 /* -1 means monkey, 0 means nothing, 1-5 means branch, 6-10 means tree*/
         switch( world[i+2] ){
             case 66:
@@ -390,16 +470,17 @@ i*4+5    Strength of the ith non-empty square
             default:
                 printf("WARNING! world contained something other than M,T,B\n");
         }
-        //updateShot(world[i+1],world[i],0);
+        //updateShot(world[i+1],world[i],0);//visual debugging
     }
     if(DEBUG){ printf("\n\n17,26: %d\n", fworld[26][17]); }
 }
 
 
 bool handle_collision(int x, int y, char** world){
+    //updates a collision block after a collision, and returns
+    //  true if a map update is needed (to check for orphaned branches)
     bool removed=false;
     if(DEBUG){
-        //printf("handle_collision called\n");
         printf("thing at %d,%d: %d\n", x,y,world[x][y]);
     }
     switch( world[x][y] ){
@@ -431,19 +512,16 @@ bool handle_collision(int x, int y, char** world){
 
 void waitms(float ms){
     //can actually only wait intervals of 10ms (so it will round up) :/
-    // still better than TIME(NULL), which only updates on seconds
+    // still better than TIME(NULL) or sleep(), which only update on seconds
     clock_t start = clock();
-    //printf("%f\n",(float)(start));
     float wait = (ms/1000) * CLOCKS_PER_SEC;
-    //printf("waiting: %f\n", wait );
     start = clock();
     clock_t now = start;
     while( (float)(now-start) < wait ){
         now=clock();
-        //printf("%f\n",(float)(time(NULL)-start));
     }
-    //printf("%f\n",(float)(now-start));
 }
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////
