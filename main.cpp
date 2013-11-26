@@ -35,7 +35,7 @@
 //my defs
 #define DEL                 1
 #define TICK                .1
-#define DEBUG               1//TODO
+#define DEBUG               0//TODO
 #define WAIT_TIME           20
 #define DIMS                40
 #define UP                  0
@@ -109,6 +109,7 @@ void trash_blacklist(chord* blacklist, char** world);
 void calculate_hint(char** world, bool send_hint);
 int check_guess(int power, int angle, int x, int y);
 chord find_branch(int x, int y, char** world, char direction);
+bool branch_check_node(int x, int y, chord* branchlist, char** world, chord* answer);
 void egg();
 
 // Global variables for push buttons
@@ -164,13 +165,16 @@ int main() {
         //receive World
         recv(connection_fd,World,BUFFSIZE,0); 
         sleep(1);
+        //waitms(100);
         fflush(stdout);    
         printf("received\n");
         
         //get world that will be used for your work
         int *world;
         if(DEBUG) printf("World parts: %d\t%d\t%d\t%d\n", World[0],World[1],World[2],World[3]);
-        if((World[0]<<8)+World[1]==0){ //This fixes the world[0]==0 bug by reopening the connection and trying again
+        if((World[0]<<8)+World[1]==0){
+            /* This fixes the world[0]==0 bug by reopening the connection and trying again. Thanks to
+               Colin Sanders for figuring it out:https://piazza.com/class/hkgysqpwsh325z?cid=237   */
             printf("ERROR: world[0] is 0! must be an allocation or communication error. Trying again...\n");
             free(World);
             close(socket_fd);
@@ -180,7 +184,7 @@ int main() {
         getworld(&world, World);
         //using if(DEBUG) is great, because the compiler will realize it isn't reachable and drop it from the output
         if(DEBUG) printf("world[0]:%d\nworld[3]:%d\n",world[0],world[3]);
-        
+        free(World);
         
         /* The sparse array is great for sending over a socket, but not very
            practical. I create a 2D char array of the world from the sparse
@@ -216,11 +220,12 @@ int main() {
         //get pb
         while(num_cannon>0 && monkey_count>0){
         //while(1){
+            //much more efficent print statement
+            printf("Angle:%d %s\tBombs left:%d Monkeys left:%d\n", angle, (power==PHIGH) ? "PHIGH" : "PLOW", num_cannon, monkey_count);
             // it's basically impossible to get a keyboard to function in the same way as mbed pushbuttons so...
             // the get_pb_zxcvqr() function returns the character of the next keyboard button pressed
             pb=get_pb_zxcvqr();
             // and then based on that character, you can do something useful!
-
             if(pb=='z'){
                 if(DEBUG) printf("Z was pressed: FIRE!!!\n");
                 pb4_hit_callback(); 
@@ -236,24 +241,12 @@ int main() {
             } else if(pb=='x'){
                     if(DEBUG) printf("X was pressed: decreasing angle\n");
                     pb3_hit_callback(); 
-                    if(power==PHIGH)
-                            printf("Angle:%d PHIGH\n", angle);
-                    else
-                            printf("Angle:%d PLOW\n", angle);
             } else if(pb=='c'){
                     if(DEBUG) printf("C was pressed: increasing angle\n");
                     pb2_hit_callback(); 
-                    if(power==PHIGH)
-                            printf("Angle:%d PHIGH\n", angle);
-                    else
-                            printf("Angle:%d PLOW\n", angle); 
             } else if(pb=='v'){
                     if(DEBUG) printf("V was pressed: toggling power\n");
                     pb1_hit_callback(); 
-                    if(power==PHIGH)
-                            printf("Angle:%d PHIGH\n", angle);
-                    else
-                            printf("Angle:%d PLOW\n", angle); 
             } else if(pb=='q'){
                 printf("EXIT\n");
                     free(world);
@@ -420,7 +413,7 @@ bool update_bomb(Bomb* bomb, char** world){
     }
        
 }
-//0-up,1-left,2-down,3-right
+
 bool check_node(int x, int y, chord* blacklist, char** world){
     if(DEBUG) printf("thing at %d,%d: %d\n", x,y,world[x][y]);
     chord c;
@@ -492,36 +485,49 @@ void trash_blacklist(chord* blacklist, char** world){
 }
 
 chord find_branch(int x, int y, char** world, char direction){
-    if(DEBUG) printf("\tchecking %d,%d (%s%s%s)\n",x,y,(world[x][y]==0) ? "AIR" : "", (world[x][y]>5) ? "TREE" : "", (world[x][y]<6 && world[x][y]>0) ? "BRANCH" : "");
+    if(DEBUG) printf("checking %d,%d (%s%s%s)\t",x,y,(world[x][y]==0) ? "AIR" : "", (world[x][y]>5) ? "TREE" : "", (world[x][y]<6 && world[x][y]>0) ? "BRANCH" : "");
     chord c;
     c.x=x; c.y=y;
-    
-    char branch_up= (world[x][y+1]>0 && world[x][y+1]<6);
-    char branch_left= (world[x-1][y]>0 && world[x-1][y]<6);
-    char branch_down= (world[x][y-1]>0 && world[x][y-1]<6);
-    char branch_right= (world[x+1][y]>0 && world[x+1][y]<6);
-    //TODO bug split branches
+    if( world[x][y]==0 ){
+        c.x=-1; c.y=-1; return c;
+    }else if( world[x][y]>5 ){ //if a tree, return the caller's chord
+        switch( direction ){
+            case UP:
+                c.y--; break;
+            case DOWN:
+                c.y++; break;
+            case LEFT:
+                c.x++; break;
+            case RIGHT:
+                c.x--; break;
+        }
+        if(DEBUG) printf("Tree at %d,%d\n",c.x,c.y);
+        return c; //I guess that this must be the place (sing into my mouth!)
+    }
+    if(DEBUG) printf("\n");
 
-    //below first
-    if(direction!=UP && world[x][y-1]>0 && world[x][y-1]<6){//branch below
-        return find_branch(x, y-1, world, DOWN);
-    }else if(direction!=RIGHT && world[x-1][y]>0 && world[x-1][y]<6){//branch left
-        return find_branch(x-1,y, world, LEFT);
-    }else if(direction!=LEFT && world[x+1][y]>0 && world[x+1][y]<6){//branch right
-        return find_branch(x+1,y,world, RIGHT);
-    }else if(direction!=DOWN && world[x][y+1]>0 && world[x][y+1]<6){//branch up (rare)
-        return find_branch(x,y+1,world, UP);
-        
-    }else if(direction!=RIGHT && world[x-1][y]>5){//tree left
-         return c;
-    }else if(direction!=LEFT && world[x+1][y]>5){//tree right
-        return c;
-    }else if(direction!=UP && world[x][y-1]>5){//tree below (rare?)
-        return c;
-    }else if(direction!=DOWN && world[x][y+1]>5){//tree up (impossible?)
-        return c;
-    }else{ printf("ERROR: orphaned branch!!!\n"); }
+    chord up,down,left,right;
+    if( direction!=UP ){//down
+        down=find_branch(x, y-1, world, DOWN);
+        if( down.x>-1 && down.y>-1 ) return down; 
+    }
+    if( direction!=LEFT ){//right
+        right=find_branch(x+1, y, world, RIGHT);
+        if( right.x>-1 && right.y>-1 ) return right; 
+    }
+    if( direction!=RIGHT ){//left
+        left=find_branch(x-1, y, world, LEFT);
+        if( left.x>-1 && left.y>-1 ) return left; 
+    }
+    if( direction!=DOWN ){//up
+        up=find_branch(x, y+1, world, UP);
+        if( up.x>-1 && up.y>-1 ) return up; 
+    }
 }
+
+
+
+
 
 void calculate_hint(char** world, bool send_hint){
     //find leftmost monkey
@@ -544,8 +550,8 @@ void calculate_hint(char** world, bool send_hint){
     if(send_hint && world[x][y-1] < 6){
         //if monkey is NOT on a tree, find the branch and use that instead.
         chord branch = find_branch(x, y-1, world, DOWN);
-        if(DEBUG) printf("monkey's branch is: %d,%d\n",branch.x,branch.y);
         x=branch.x; y=branch.y;
+        if(DEBUG) printf("branch: %d,%d\n",x,y);
     }
     /* Here is a pretty simple, trig-light guessing scheme: The angle is always going to be
        a little higher than the angle to the monkey. We can calculate this pretty quickly
