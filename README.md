@@ -26,14 +26,14 @@ start the backend
   ./main
 
 Then you can use the keypad to play the game.
-Z - fire cannon
-X - decrease angle
-C - increase angle
-V - toggle power
-H - give me a hint
-R - reset
-Q - quit
-D - ???
+- Z - fire cannon
+- X - decrease angle
+- C - increase angle
+- V - toggle power
+- H - give me a hint
+- R - reset
+- Q - quit
+- D - ???
 
 
 Notes
