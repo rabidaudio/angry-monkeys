@@ -140,10 +140,10 @@ class GUI(Tkinter.Tk):
         
         # load world
         if len(sys.argv) < 2:
-            self.worldnumber = random.choice([1,2,3,4,5])
+            self.worldnumber = random.choice([0,1,2,3,4])
         else:
-            self.worldnumber = int(sys.argv[1])
-        self.worldfname = "worlds/World%d.csv"%(self.worldnumber)
+            self.worldnumber = int(sys.argv[1])-1
+        self.worldfname = "worlds/World%d.csv"%(self.worldnumber+1)
         self.world = World()
         self.world.fromCSV(self.worldfname)
         self.worldObjects = None
