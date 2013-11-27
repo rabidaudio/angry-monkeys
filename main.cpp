@@ -532,8 +532,9 @@ void calculate_hint(bool send_hint){
         //if monkey is NOT on a tree, find the branch and use that instead.
         ord branch = find_branch(x, y-1, DOWN);
         x=branch.x; y=branch.y;
-        if(DEBUG) printf("branch: %d,%d\n",x,y);
+        printf("branch: %d,%d\n",x,y);
     }
+    
     /* Here is a pretty simple, trig-light guessing scheme: The angle is always going to be
        a little higher than the angle to the monkey. We can calculate this pretty quickly
        and then compensate. I ran a lot of data and used linear regression to find compensation
@@ -572,10 +573,10 @@ ord find_branch(int x, int y, char direction){
     //  It passes along the heading direction so it doesn't accidentally scan backwards.
     //  Of course, this won't work for branches that are two blocks thick or branches that
     //  connect to trees at two points, but it will work for forked branches. 
-    if(DEBUG) printf("checking %d,%d (%s%s%s)\t",x,y,
+    if(DEBUG){ printf("checking %d,%d (%s%s%s)\t",x,y,
                 (full_world[x][y]==AIR) ? "AIR" : "",
                 (full_world[x][y]>5) ? "TREE" : "",
-                (full_world[x][y]<6 && full_world[x][y]>0) ? "BRANCH" : "");
+                (full_world[x][y]<6 && full_world[x][y]>0) ? "BRANCH" : ""); }
     ord c;
     c.x=x; c.y=y;
     if( full_world[x][y]==AIR ){
@@ -596,22 +597,22 @@ ord find_branch(int x, int y, char direction){
     }
     if(DEBUG) printf("\n");
 
-    ord o;
+    ord n,s,e,w;
     if( direction!=UP ){//down
-        o=find_branch(x, y-1, DOWN);
-        if( o.x>nil && o.y>nil ) return o; 
+        n=find_branch(x, y-1, DOWN);
+        if( n.x>nil && n.y>nil ){ return n; }
     }
     if( direction!=LEFT ){//right
-        o=find_branch(x+1, y, RIGHT);
-        if( o.x>nil && o.y>nil ) return o; 
+        w=find_branch(x+1, y, RIGHT);
+        if( w.x>nil && w.y>nil ){ return w; }
     }
     if( direction!=RIGHT ){//left
-        o=find_branch(x-1, y, LEFT);
-        if( o.x>nil && o.y>nil ) return o; 
+        e=find_branch(x-1, y, LEFT);
+        if( e.x>nil && e.y>nil ){ return e; }
     }
     if( direction!=DOWN ){//up
-        o=find_branch(x, y+1, UP);
-        if( o.x>nil && o.y>nil ) return o; 
+        s=find_branch(x, y+1, UP);
+        if( s.x>nil && s.y>nil ){ return s; }
     }
 }
 
