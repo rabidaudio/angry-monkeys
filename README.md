@@ -49,6 +49,8 @@ only die when they have been completely cut through.
 I fixed some of the more buggy parts of the code included with the assignment. World data is stored in the heap,
 and when it fails to initalize correctly (a bug widespread in the class), it retries.
 
+The python script was modifed to pull from the worlds/ directory. It takes a number as an optional argument to test specific world numbers.
+
 The game ends when you run out of bombs or kill all the monkeys.
 
 Levels are in a pretty simple CSV format if you want to make your own.
