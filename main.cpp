@@ -33,17 +33,25 @@
 #define UNIX_PATH_MAX       100
 
 //my defs
+//  testing
 #define DEL                 1
-#define TICK                .1
-#define DEBUG               1//TODO
-#define WAIT_TIME           0//20 TODO
+#define DEBUG               0
 #define DIMS                40
+#define use                 10
+//  directions
 #define UP                  0
 #define DOWN                2
 #define LEFT                1
 #define RIGHT               3
-#define use                 10
-
+//  Constants for code clarity
+#define nil                 -1
+#define AIR                 0
+#define MONKEY              -1
+//  projectile frame rate. TICK controls the
+//  projectile's update resolution, and WAIT_TIME
+//  limits the frame rate to something reasonable
+#define WAIT_TIME           20
+#define TICK                .1
 
 
 typedef struct Doge{      char
@@ -67,7 +75,8 @@ typedef struct Bomb{
     float vy;
 } Bomb;
 
-//2D coordinate
+//2D coordinate. this lets us return pairs
+// from functions and store in arrays
 typedef struct ord{
     int x;
     int y;
@@ -102,24 +111,25 @@ void egg();
 //Projectile functions
 Bomb* launch(int angle, int power);
 ord bomb_tick(Bomb* bomb);
-bool update_bomb(Bomb* bomb, char** world);
-bool handle_collision(int x, int y, char** world);
+bool update_bomb(Bomb* bomb);
+bool handle_collision(int x, int y);
 
 
 //Structure destruction functions
-void orphan_scan(int x, int y, ord* goodlist, char** world);
+void orphan_scan(int x, int y, ord* goodlist);
 bool in_goodlist(ord* goodlist, ord c);
-void trash_goodlist(ord* goodlist, char** world);
+void trash_goodlist(ord* goodlist);
 
 
 //Hint functions
-void calculate_hint(char** world, bool send_hint);
-ord find_branch(int x, int y, char** world, char direction);
+void calculate_hint(bool send_hint);
+ord find_branch(int x, int y, char direction);
 int check_guess(int power, int angle, int x, int y);
 
 
 //Helper functions
-void build_fullworld(char** fworld, int *world);
+void build_fullworld(int *world);
+void remove_from_blocks(int x, int y);
 void waitms(float ms);
 
 
@@ -133,9 +143,11 @@ int block_count;
 ord* blocks;
 int monkey_count;
 
-int bl_index=-1;
+int bl_index=nil;
 
-//TODO char** full_world;
+//I made the pointer to my different world array global so I wouldn't
+//  have to pass it to every single function
+char** full_world;
 
 
 //main
@@ -204,17 +216,17 @@ int main() {
            practical. I create a 2D char array of the world from the sparse
            array and use that instead. It makes the searching algorithms alone
            many times easier (and it's not like it's a huge resource cost). */
-        if(DEBUG) printf("allocating fworld\n"); 
-        char** fw = (char**)malloc(DIMS*sizeof(char*)); // yo, dawg, I heard you like pointers...
+        if(DEBUG) printf("allocating full_world\n"); 
+        full_world = (char**)malloc(DIMS*sizeof(char*)); // yo, dawg, I heard you like pointers...
         int f;
         for(f=0;f<DIMS;f++){
-            fw[f]=(char*)calloc(DIMS*sizeof(char),sizeof(char)); //calloc makes them all zeros, too
-            if(fw[f]==NULL){ printf("ERROR ALLOCATING!\n"); exit(1); }
+            full_world[f]=(char*)calloc(DIMS*sizeof(char),sizeof(char)); //calloc makes them all zeros, too
+            if(full_world[f]==NULL){ printf("ERROR ALLOCATING!\n"); exit(1); }
         }
-        if(fw==NULL){ printf("ERROR allocating full world!"); exit(1); }
-        if(DEBUG) printf("fworld allocated. filling...\n"); 
-        build_fullworld(fw, world);
-        if(DEBUG) printf("fworld filled.\n"); 
+        if(full_world==NULL){ printf("ERROR allocating full world!"); exit(1); }
+        if(DEBUG) printf("full_world allocated. filling...\n"); 
+        build_fullworld(world);
+        if(DEBUG) printf("full_world filled.\n"); 
 
 
         //clear the terminal
@@ -226,11 +238,11 @@ int main() {
         printf("Z - fire cannon\nX - decrease angle    C - increase angle\nV - toggle power\nH - give me a hint\nR - reset    Q - quit\n");
  
     
-        int i, num_cannon=100;//TODO
+        int i, num_cannon=10;
         char pb;
         
         updateShot(0,0,DEL); //reset bomb position
-        calculate_hint(fw, true);
+        calculate_hint(true);
         //get pb
         while(num_cannon>0 && monkey_count>0){
             //much more efficent print statement
@@ -249,7 +261,7 @@ int main() {
                 updateShot(0,0,DEL);
                 bool collision = false;
                 while( !collision ){ //bomb is soaring through the air
-                    collision=update_bomb(b, fw);
+                    collision=update_bomb(b);
                     waitms(WAIT_TIME); //sexy
                 }
                 num_cannon--;
@@ -266,13 +278,15 @@ int main() {
             } else if(pb=='q'){
                 printf("EXIT\n");
                     free(world);
-                    free(fw);
+                    free(full_world);
                     close(socket_fd);
             exit(1);
             }  else if(pb=='r'){
+                    //TODO Don't actually use this. It causes a segfault. Not my code, not my fault.
+                    //  Not my chair, not my problem. That's what I say.
                     printf("RESTART\n");
                     free(world);
-                    free(fw);
+                    free(full_world);
                     close(socket_fd);
                     goto START;
                     /*"For a number of years I have been familiar with the observation that the quality of programmers
@@ -283,7 +297,7 @@ int main() {
                                  http://www.u.arizona.edu/~rubinson/copyright_violations/Go_To_Considered_Harmful.html */
             } else if(pb=='d'){ egg();
             } else if(pb=='h'){
-                calculate_hint(fw, false);
+                calculate_hint(false);
             }  else {
                 printf("Unknown command.\n");
             }
@@ -295,7 +309,7 @@ int main() {
 
 
         free(world);  
-        free(fw);
+        free(full_world);
         close(socket_fd);
         exit(1);
     }
@@ -303,9 +317,6 @@ int main() {
 
 }
 
-
-
-//TODO make pointer to fullworld global, so we don't have to pass it to EVERY FREAKING FUNCTION
 
 
 
@@ -340,57 +351,57 @@ ord bomb_tick(Bomb* bomb){
 }
 
 
-bool update_bomb(Bomb* bomb, char** world){
-    //move the bomb one more tick, and return true if the shot is over
+bool update_bomb(Bomb* bomb){
+    //move the bomb one more tick, clean up the map after a collision, and return true if the shot is over
     ord c = bomb_tick(bomb);
     int x=c.x;
     int y=c.y;
     updateShot(y, x, DEL);//stupid update shot wants y,x (row, col)
     //check for collisions
-    if( x>DIMS-1 || x<0 || y<0 ){// || y>DIMS-1   // TODO can it go off map from above?
+    if( x>DIMS-1 || x<0 || y<0 ){// || y>DIMS-1   //can it go off map from above? I hope so
         if(DEBUG) printf("Off-screen\n"); 
         updateShot(0,0,DEL); //reset bomb position
         return true;
     //above:
     }else if( y>DIMS-1 ){
         return false;  //nothing to hit up there, so don't try and read from outside the world
-    }else if(world[x][y]!=0){
+    }else if(full_world[x][y]!=AIR){
         if(DEBUG) printf("Collision!\n");
-        bool update_map = handle_collision(x, y, world);
+        bool update_map = handle_collision(x, y);
         updateShot(0,0,DEL); //reset bomb position
         
         if(update_map){
-            /*  I had to rewrite my inital map update algorithm because although it was cool,
+            /*  I had to rewrite my initial map update algorithm because although it was cool,
                 it didn't handle trees correctly. This one is less clever but more elegant
                 (albeit a little less efficient). I go through each grounded block group (so
                 it only runs once for each tree, no matter how wide), and use a depth-first
                 recursive search to add all found blocks to the Good List. Then, using the
-                Blocks list (a list of all non-air blocks generated during create_fullworld)
+                Blocks list (a list of all non-air blocks generated during build_fullworld)
                 remove any orphaned blocks or monkeys from the map.                        */
         
             //Search
             ord goodlist[block_count]; //he's making a list...
-            bl_index=-1;
+            bl_index=nil;
             int g;  ord o;
             o.x=0; o.y=0;
             for(g=0; g<DIMS; g++){
                 o.x=g;
-                if(world[g][0]>0 && !in_goodlist(goodlist, o) ){
-                   orphan_scan(g,0,goodlist, world);
+                if(full_world[g][0]>0 && !in_goodlist(goodlist, o) ){
+                   orphan_scan(g,0,goodlist);
                 }
             }
 
             //Destroy
             if(DEBUG) printf("%d (of %d) things put on goodlist\n",bl_index,block_count);
             int k;
-            for(k=0;k<block_count;k++){//...he's checking it twice
+            for(k=0;k<block_count;k++){ //...he's checking it twice
                 o=blocks[k];
-                if( ((o.x != -1) && (o.y != -1)) && !in_goodlist(goodlist, o)  ){
+                if( ((o.x != nil) && (o.y != nil)) && !in_goodlist(goodlist, o)  ){
                     //if it hasn't already been cleared and isn't on the good list
                     deleteTile(o.y,o.x);
-                    if(world[o.x][o.y]==-1) monkey_count--;
-                    world[o.x][o.y]=0;
-                    o.x=-1; o.y=-1; //TODO define nil==-1
+                    if(full_world[o.x][o.y]==MONKEY) monkey_count--;
+                    full_world[o.x][o.y]=AIR;
+                    o.x=nil; o.y=nil;
                 }
             }
         }
@@ -400,25 +411,27 @@ bool update_bomb(Bomb* bomb, char** world){
     }
 }
 
-bool handle_collision(int x, int y, char** world){
+bool handle_collision(int x, int y){
     //updates a collision block after a collision, and returns
     //  true if a map update is needed (to check for orphaned branches)
     bool removed=false;
-    if(DEBUG) printf("thing at %d,%d: %d\n", x,y,world[x][y]);
-    char item= world[x][y];
-    switch( world[x][y] ){
-        case -1: //Monkey
-            monkey_count--; //decrement monkeylist
+    if(DEBUG) printf("thing at %d,%d: %d\n", x,y,full_world[x][y]);
+    char item= full_world[x][y];
+    switch( full_world[x][y] ){
+        case MONKEY: //Monkey
+            monkey_count--;
         case 1: //Dead branch
-            world[x][y]=0;
+            full_world[x][y]=AIR;
             deleteTile(y,x);
+            remove_from_blocks(x,y);
             removed=true;
             break;
         case 6: //dead tree
             while(item>5){//while trees
-                world[x][y]=0;
+                full_world[x][y]=AIR;
                 deleteTile(y,x);
-                item=world[x][++y];
+                remove_from_blocks(x,y);
+                item=full_world[x][++y];
             }
             removed=true;
             break;
@@ -426,13 +439,13 @@ bool handle_collision(int x, int y, char** world){
         case 3:
         case 4:
         case 5:
-            colorTile(y,x,--world[x][y]);
+            colorTile(y,x,--full_world[x][y]);
             break;
         case 7: //trees
         case 8:
         case 9:
         case 10:
-            colorTile(y,x,(--world[x][y])-5);
+            colorTile(y,x,(--full_world[x][y])-5);
             break;
         default:
             printf("WTF!?!?\n");
@@ -444,32 +457,32 @@ bool handle_collision(int x, int y, char** world){
 
 /*//==========================STRUCTURE DESTRUCTION FUNCTIONS===========================//*/
 
-void orphan_scan(int x, int y, ord* goodlist, char** world){
+void orphan_scan(int x, int y, ord* goodlist){
+    //Recursively add connected blocks to the Good List
     if (DEBUG) printf("Scanning %d,%d (%s%s%s)\n", x, y,
-            ((world[x][y]<0) ? "monkey" : ""),
-            ((world[x][y]>5) ? "tree" : ""),
-            ((world[x][y]>0 && world[x][y]<6) ? "branch" : ""));
-    ord c;
-    c.x=x; c.y=y;
-    if( in_goodlist(goodlist, c) ) return;
+            ((full_world[x][y]<0) ? "monkey" : ""),
+            ((full_world[x][y]>5) ? "tree" : ""),
+            ((full_world[x][y]>0 && full_world[x][y]<6) ? "branch" : ""));
+    ord c; c.x=x; c.y=y;
+    if( in_goodlist(goodlist, c) ) return; //already been done
     //otherwise...
-    switch( world[x][y] ){
-        case 0://air
+    switch( full_world[x][y] ){
+        case AIR:
             if(DEBUG) printf("\tjust air\n");
             break;
-        case -1://monkey //TODO define AIR and MONKEY
-            if( !world[x][y-1]==0 ){//a monkey not on solid ground
-                if(DEBUG) printf("\tun orphaned monkey\n");
+        case MONKEY:
+            if( full_world[x][y-1]!=AIR ){//a monkey not on solid ground
+                if(DEBUG) printf("\torphaned monkey\n");
                 goodlist[++bl_index]=c;
             }
             break;
-        default:
+        default: //trees and branches
             if(DEBUG) printf("\tadding to goodlist\n");
             goodlist[++bl_index]=c;
-            orphan_scan(x,y+1, goodlist, world);
-            orphan_scan(x,y-1, goodlist, world);
-            orphan_scan(x+1,y, goodlist, world);
-            orphan_scan(x-1,y, goodlist, world);
+            orphan_scan(x,y+1, goodlist);
+            orphan_scan(x,y-1, goodlist);
+            orphan_scan(x+1,y, goodlist);
+            orphan_scan(x-1,y, goodlist);
     }
 }
 
@@ -487,62 +500,43 @@ bool in_goodlist(ord* goodlist, ord c){
     if(DEBUG) printf("not found in goodlist\n"); 
     return false;
 }
-void trash_goodlist(ord* goodlist, char** world){
-    //go backwards through the goodlist, removing tiles.
-    if(DEBUG){
-        printf("current goodlist snapshot (%d):\n", bl_index);
-        int j;
-        for(j=0;j<=bl_index;j++){
-            printf("\t\t%d,%d\n", goodlist[j].x,goodlist[j].y);
-        }
-    }
-    int i=bl_index;
-    while( i >= 0 ){
-        if(DEBUG) printf("\tdeleting %d,%d...\n",goodlist[i].x,goodlist[i].y);
-        if( world[ goodlist[i].x ][ goodlist[i].y ]==-1 ) monkey_count--; //decrement monkeylist
-        world[ goodlist[i].x ][ goodlist[i].y ]=0;
-        deleteTile( goodlist[i].y, goodlist[i].x );
-        goodlist[i].y=-1;
-        goodlist[i].x=-1;
-        i--;
-    }
-    if(DEBUG) printf("Done deleteing\n"); 
-    bl_index=-1;
-}
-
 
 
 
 
 
 /*//==============================HINT FUNCTIONS=============================//*/
-void calculate_hint(char** world, bool send_hint){
+void calculate_hint(bool send_hint){
+    //find the next monkey or branch and calculate how to hit it. if send_hint is
+    //  true, this will find the leftmost monkey's branch and send that to the GUI.
+    //  otherwise, it will simply print the power and angle combination to hit the
+    //  leftmost monkey.
+    
     //find leftmost monkey
-    int x=-1;
-    int y=-1;
-    int i,j;
-    for(i=0; i<DIMS; i++){
-        for(j=0;j<DIMS; j++){
-            if(world[i][j]==-1){
-                x=i; y=j;
-                break;
-            }
+    int x=nil;
+    int y=nil;
+    int i;
+    int j=DIMS;
+    ord o;
+    for(i=0; i<block_count; i++){
+        o=blocks[i];
+        if( (o.x>0 && o.y>0) && full_world[o.x][o.y]==MONKEY && o.x<j){
+            x=o.x; y=o.y; j=o.x;
         }
-        if(x!=-1 && y!=-1) break;
     }
     if(x<0 || y<0){ printf("Oh man, there aren't no monkeys here! badness 10000\n"); exit(1); }
     if(DEBUG) printf("leftmost monkey: %d,%d\n",x,y);
     
     //find his/her branch
-    if(send_hint && world[x][y-1] < 6){
+    if(send_hint && full_world[x][y-1] < 6){
         //if monkey is NOT on a tree, find the branch and use that instead.
-        ord branch = find_branch(x, y-1, world, DOWN);
+        ord branch = find_branch(x, y-1, DOWN);
         x=branch.x; y=branch.y;
         if(DEBUG) printf("branch: %d,%d\n",x,y);
     }
     /* Here is a pretty simple, trig-light guessing scheme: The angle is always going to be
        a little higher than the angle to the monkey. We can calculate this pretty quickly
-       and then compensate. I ran a lot of data and used linear models to find compensation
+       and then compensate. I ran a lot of data and used linear regression to find compensation
        based on the x and y values of the monkey position. These numbers are incredibly
        accurate; it usually isn't off by more than a single degree which is fixed in the
        next phase. The raw data is in hint-linear-model-data.gnumeric                     */
@@ -553,7 +547,10 @@ void calculate_hint(char** world, bool send_hint){
     
     /* I'm not sure why we are guessing. The code can try every case lightning fast.
        If we have to confirm any guess anyway, why waste the effort? Will you actually 
-       notice the handful milliseconds you'd save? Nope.                           */
+       notice the handful milliseconds you save? Nope.
+       Anyhow, this actually launches an "imaginary" bomb and waits for it to go the
+       full horizontal difference. If it is too low or high, it adjusts the angle and
+       repeats the experiment.                                                      */
     int guess = check_guess(power, angle, x, y);
     int guess_count=0;
     while( guess != 0 ){
@@ -565,17 +562,25 @@ void calculate_hint(char** world, bool send_hint){
     if(send_hint){
         hint(y,x,power,angle);
     }else{
-        printf("Try angle %d, power %s\n", angle, power==PHIGH ? "PHIGH" : "PLOW");
+        if(!DEBUG) printf("\033[A\033[2K\033[A\033[2K");//remove last 2 lines
+        printf("Try angle %d, power %s\n\n", angle, power==PHIGH ? "PHIGH" : "PLOW");
     }
 }
 
-ord find_branch(int x, int y, char** world, char direction){
-    if(DEBUG) printf("checking %d,%d (%s%s%s)\t",x,y,(world[x][y]==0) ? "AIR" : "", (world[x][y]>5) ? "TREE" : "", (world[x][y]<6 && world[x][y]>0) ? "BRANCH" : "");
+ord find_branch(int x, int y, char direction){
+    //Recursive search algorithm for finding the branch block that connects to the tree.
+    //  It passes along the heading direction so it doesn't accidentally scan backwards.
+    //  Of course, this won't work for branches that are two blocks thick or branches that
+    //  connect to trees at two points, but it will work for forked branches. 
+    if(DEBUG) printf("checking %d,%d (%s%s%s)\t",x,y,
+                (full_world[x][y]==AIR) ? "AIR" : "",
+                (full_world[x][y]>5) ? "TREE" : "",
+                (full_world[x][y]<6 && full_world[x][y]>0) ? "BRANCH" : "");
     ord c;
     c.x=x; c.y=y;
-    if( world[x][y]==0 ){
-        c.x=-1; c.y=-1; return c;
-    }else if( world[x][y]>5 ){ //if a tree, return the caller's ord
+    if( full_world[x][y]==AIR ){
+        c.x=nil; c.y=nil; return c;
+    }else if( full_world[x][y]>5 ){ //if a tree, return the caller's ord
         switch( direction ){
             case UP:
                 c.y--; break;
@@ -591,26 +596,27 @@ ord find_branch(int x, int y, char** world, char direction){
     }
     if(DEBUG) printf("\n");
 
-    ord up,down,left,right;
+    ord o;
     if( direction!=UP ){//down
-        down=find_branch(x, y-1, world, DOWN);
-        if( down.x>-1 && down.y>-1 ) return down; 
+        o=find_branch(x, y-1, DOWN);
+        if( o.x>nil && o.y>nil ) return o; 
     }
     if( direction!=LEFT ){//right
-        right=find_branch(x+1, y, world, RIGHT);
-        if( right.x>-1 && right.y>-1 ) return right; 
+        o=find_branch(x+1, y, RIGHT);
+        if( o.x>nil && o.y>nil ) return o; 
     }
     if( direction!=RIGHT ){//left
-        left=find_branch(x-1, y, world, LEFT);
-        if( left.x>-1 && left.y>-1 ) return left; 
+        o=find_branch(x-1, y, LEFT);
+        if( o.x>nil && o.y>nil ) return o; 
     }
     if( direction!=DOWN ){//up
-        up=find_branch(x, y+1, world, UP);
-        if( up.x>-1 && up.y>-1 ) return up; 
+        o=find_branch(x, y+1, UP);
+        if( o.x>nil && o.y>nil ) return o; 
     }
 }
 
 int check_guess(int power, int angle, int x, int y){
+    //Launch a hypothetical bomb and see if it hits the target
     Bomb* hint = launch(angle, power);
     int hx = hint->x;
     ord c;
@@ -634,18 +640,26 @@ int check_guess(int power, int angle, int x, int y){
 
 /*//==============================HELPER FUNCTIONS=============================//*/
 
-void build_fullworld(char** fworld, int* world){
-/*
-0        Total size of array (#rows *#columns)
-1        Number of non-empty squares
-i*4+2    Row index of ith non-empty square
-i*4+3    Column index of ith non-empty square
-i*4+4    Type of object in ith non-empty square
-i*4+5    Strength of the ith non-empty square
-‘M’, ‘T’, and ‘B’ are ASCII codes 77, 84, and 66. The strength field will be an integer 1-5.
+void build_fullworld(int* world){
+/*  This function builds a Better World (array). full_world is a 2D char array indexed
+    x,y (or column,row if you prefer) with the following properties:
+        Monkey  => -1
+        Air     => 0
+        Branch  => strength (1-5)
+        Tree    => strength + 5 (6-10)
+    This makes reading world data super easy and also makes it quick to test certain
+    groups of block types:
+        b = full_world[x][y];
+        conditionals:
+            ( b )   => non-empty block
+          ( b > 0 ) => structure (tree or branch)
+          ( b > 5 ) => tree
 */
     int i=0, j=0;
     ord o;
+    //The one flaw in using the full_world is that it takes a while to search.
+    //  To compensate, the blocks array stores a list of the x,y coordinates for
+    //  all non-empty blocks. Thus, we can search through the world MUCH faster.
     block_count=world[1];
     blocks=(ord*)malloc(block_count*sizeof(ord));
     for(i=2;i<world[1]*4+2;i+=4){
@@ -655,17 +669,16 @@ i*4+5    Strength of the ith non-empty square
             printf("%dtype:\t%d\n",i,world[i+2]);
             printf("%dstrength:\t%d\n",i,world[i+3]);
         }
-/* -1 means monkey, 0 means nothing, 1-5 means branch, 6-10 means tree*/
         switch( world[i+2] ){
             case 66:
-                fworld[world[i+1]][world[i]]= world[i+3];
+                full_world[world[i+1]][world[i]]= world[i+3];
                 break;
             case 77:
-                monkey_count++; //add one to the monkey list
-                fworld[world[i+1]][world[i]]= -1;
+                monkey_count++;
+                full_world[world[i+1]][world[i]]= MONKEY;
                 break;
             case 84:
-                fworld[world[i+1]][world[i]]= 5+world[i+3];
+                full_world[world[i+1]][world[i]]= 5+world[i+3];
                 break;
             default:
                 printf("WARNING! world contained something other than M,T,B\n");
@@ -675,11 +688,22 @@ i*4+5    Strength of the ith non-empty square
         o.x=world[i+1]; o.y=world[i];
         blocks[j++]=o;
     }
-    if(DEBUG){ printf("\n\n17,26: %d\n", fworld[26][17]); }
+    if(DEBUG){ printf("\n\n17,26: %d\n", full_world[26][17]); }
+}
+
+void remove_from_blocks(int x, int y){
+    int i;
+    for(i=0; i<block_count; i++){
+        if(blocks[i].x==x && blocks[i].y==y){
+            blocks[i].x=nil;
+            blocks[i].y=nil;
+            break;
+        }
+    }
 }
 
 void waitms(float ms){
-    //can actually only wait intervals of 10ms (so it will round up) :/
+    //This can actually only wait intervals of 10ms (so it will round up) :/
     // still better than TIME(NULL) or sleep(), which only update on seconds
     clock_t start = clock();
     float wait = (ms/1000) * CLOCKS_PER_SEC;
