@@ -16,6 +16,7 @@ import time
 import struct
 from math import floor
 import math
+import sys
 
 # Auto-hiding Scrollbar
 class autoScrollBar(Tkinter.Scrollbar):
@@ -138,8 +139,11 @@ class GUI(Tkinter.Tk):
         self.protocol('WM_DELETE_WINDOW', self._windowClose)
         
         # load world
-        self.worldnumber = random.choice([0,1,2,3,4])
-        self.worldfname = "World%d.csv"%(self.worldnumber+1)
+        if len(sys.argv) < 2:
+            self.worldnumber = random.choice([1,2,3,4,5])
+        else:
+            self.worldnumber = int(sys.argv[1])
+        self.worldfname = "worlds/World%d.csv"%(self.worldnumber)
         self.world = World()
         self.world.fromCSV(self.worldfname)
         self.worldObjects = None
