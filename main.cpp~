@@ -52,9 +52,9 @@
 //  limits the frame rate to something reasonable.
 //  SLOW_UPDATE enables destruction animation but
 //  it doesn't always look great, so it's disabled
-#define WAIT_TIME           20
+#define WAIT_TIME           10
 #define TICK                .1
-#define SLOW_UPDATE         0
+#define SLOW_UPDATE         1
 
 
 typedef struct Doge{      char
